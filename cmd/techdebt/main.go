@@ -9,6 +9,7 @@
 		tallaq callgraph [-root DIR] [-format text|json] <file|dir>
 		tallaq churn     [-top N] [-max-commits N] [-since YYYY-MM-DD] [-format text|json] <repo>
 		tallaq clumps    [-threshold N] [-min-size N] [-include-tests] [-format text|json] <dir>
+		tallaq redundancy [-mode dead|similar|all] [-min-lines N] [-near F] [-semantic F] [-private-only] [-include-tests] [-format text|json] <dir>
 */
 package main
 
@@ -29,6 +30,7 @@ import (
 	"github.com/isocroft/tallaq/internal/deptree"
 	"github.com/isocroft/tallaq/internal/gitsifter"
 	"github.com/isocroft/tallaq/internal/modname"
+	"github.com/isocroft/tallaq/internal/redundancy"
 )
 
 func main() {
@@ -49,6 +51,8 @@ func main() {
 		err = runChurn(ctx, os.Args[2:])
 	case "clumps":
 		err = runClumps(ctx, os.Args[2:])
+	case "redundancy":
+		err = runRedundancy(ctx, os.Args[2:])
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 	default:
@@ -73,6 +77,7 @@ Commands:
   callgraph <file|dir>   functions, their callees and recursion
   churn     <repo>       functions whose interface changes most in git history
   clumps    <dir>        data/struct/class/dependency/call clumps
+  redundancy <dir>       dead code and similar (duplicate / same-behaviour) code
 
 Run "tallaq <command> -h" for flags.
 `)
@@ -294,4 +299,67 @@ func runClumps(ctx context.Context, args []string) error {
 		return clumper.WriteJSON(os.Stdout, clumps)
 	}
 	return clumper.WriteText(os.Stdout, clumps, *root)
+}
+
+func runRedundancy(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("redundancy", flag.ExitOnError)
+	mode := fs.String("mode", "all", "what to report: dead, similar or all")
+	minLines := fs.Int("min-lines", 5, "ignore functions shorter than this when looking for similar code")
+	near := fs.Float64("near", 0.80, "minimum similarity (0-1) for near-miss clones")
+	semantic := fs.Float64("semantic", 0.85, "minimum similarity (0-1) for same-behaviour matches")
+	privateOnly := fs.Bool("private-only", false, "dead code: hide exported/public symbols and methods (medium confidence)")
+	includeTests := fs.Bool("include-tests", false, "also report findings inside test files")
+	root := fs.String("root", "", "project root for relative paths (default: the scanned dir)")
+	format := fs.String("format", "text", "output format: text or json")
+	_ = fs.Parse(args)
+
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: tallaq redundancy [flags] <dir>")
+	}
+	if *mode != "dead" && *mode != "similar" && *mode != "all" {
+		return fmt.Errorf("invalid -mode %q (want dead, similar or all)", *mode)
+	}
+
+	dir, err := filepath.Abs(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if *root == "" {
+		*root = dir
+	}
+
+	a := redundancy.New(redundancy.Options{
+		Root:              *root,
+		IncludeTests:      *includeTests,
+		PrivateOnly:       *privateOnly,
+		MinLines:          *minLines,
+		NearThreshold:     *near,
+		SemanticThreshold: *semantic,
+	})
+
+	if err := a.ProcessDir(ctx, dir); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
+
+	report := &redundancy.Report{}
+	if *mode == "dead" || *mode == "all" {
+		report.Dead = a.AnalyzeDead()
+		if report.Dead == nil {
+			report.Dead = []redundancy.DeadItem{}
+		}
+	}
+	if *mode == "similar" || *mode == "all" {
+		report.Clones = a.AnalyzeClones()
+		if report.Clones == nil {
+			report.Clones = []redundancy.CloneGroup{}
+		}
+	}
+
+	if *format == "json" {
+		return redundancy.WriteJSON(os.Stdout, report)
+	}
+	return redundancy.WriteText(os.Stdout, report, *root)
 }

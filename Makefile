@@ -4,10 +4,10 @@ tidy:
 	GOPROXY=direct go mod tidy
 
 build: tidy
-	go build -o bin/tallaq ./cmd/techdebt
+	CGO_ENABLED=1 go build -ldflags="-X 'github.com/isocroft/tallaq/debugging.enabledFlag=true'" -o bin/tallaq ./cmd/techdebt
 
 test:
-	go test $$(go list ./... | grep -viE '/parse|/gitsifter|/clumper|/callgraph|/techdebt')
+	go test $$(go list ./... | grep -viE '/parse|/gitsifter|/health|/clumper|/techdebt')
 
 vet:
 	go vet ./...
@@ -16,4 +16,4 @@ fmt:
 	gofmt -s -w .
 
 run:
-	go run ./cmd/techdebt $(ARGS)
+	CGO_ENABLED=1 go run ./cmd/techdebt $(ARGS)

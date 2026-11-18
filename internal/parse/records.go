@@ -123,7 +123,7 @@ func (f *File) classRecord(n *sitter.Node) (Record, bool) {
 	return rec, len(rec.Fields) > 0
 }
 
-// jsFields: class field definitions plus `this.x = ...` in the constructor.
+/* @HINT: `jsFields(...)` gathers class field definitions plus `this.x = ...` in the constructor. */
 func (f *File) jsFields(body *sitter.Node, add func(Field)) {
 	for _, m := range namedChildren(body) {
 		switch m.Type() {
@@ -152,7 +152,7 @@ func (f *File) jsFields(body *sitter.Node, add func(Field)) {
 	}
 }
 
-// pyFields: class-level (annotated) assignments plus `self.x = ...` in `__init__`.
+/* @HINT: `pyFields(...)` gathers class-level (annotated) assignments plus `self.x = ...` in `__init__`. */
 func (f *File) pyFields(body *sitter.Node, add func(Field)) {
 	for _, stmt := range namedChildren(body) {
 		switch stmt.Type() {
@@ -192,7 +192,7 @@ func (f *File) pyFields(body *sitter.Node, add func(Field)) {
 	}
 }
 
-// phpFields: property declarations plus constructor-promoted properties.
+/* @HINT: `phpFields(...)` gathers property declarations plus constructor-promoted properties. */
 func (f *File) phpFields(body *sitter.Node, add func(Field)) {
 	for _, m := range namedChildren(body) {
 		switch m.Type() {

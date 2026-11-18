@@ -8,21 +8,33 @@ import (
 	"github.com/isocroft/tallaq/internal/langs"
 )
 
-// Import is one imported module binding.
-//
-// The gist's tree-sitter query only handled Go and used the wrong node
-// name for its path (`string_literal`; Go uses
-// `interpreted_string_literal`). Imports are now read from the syntax tree
-// for all four languages.
+/*
+@HINT:
+
+`Import` is one imported module binding.
+
+The former tree-sitter query only handled Go and used the wrong node
+name for its path (`string_literal`; Go uses
+`interpreted_string_literal`). Imports are now read from the syntax tree
+for all four languages.
+*/
 type Import struct {
 	Path  string // module as written: "./api", "numpy", "project/service"
 	Name  string // imported member ("" for whole-module, "default" for JS defaults)
 	Local string // name bound in this file ("" for side-effect imports)
 	Line  uint32
+
+	// Require is true for CommonJS `const x = require("x")`, where the
+	// declaration itself also mentions Local once.
+	Require bool
 }
 
-// Original returns what Local refers to: "pkg.fn" for a named import,
-// otherwise the module path.
+/*
+@HINT:
+
+`Original(...)` returns what Local refers to: "pkg.fn" for a named import,
+otherwise the module path.
+*/
 func (i Import) Original() string {
 	if i.Name == "" || i.Name == "default" {
 		return i.Path
@@ -30,7 +42,7 @@ func (i Import) Original() string {
 	return i.Path + "." + i.Name
 }
 
-// Imports lists every import in the file.
+/* @HINT: `Imports(...)` lists every import in the file. */
 func (f *File) Imports() []Import {
 	var out []Import
 
@@ -56,9 +68,12 @@ func (f *File) Imports() []Import {
 	return out
 }
 
-// AliasMap maps local binding names to what they stand for, e.g.
-// {"np": "numpy", "svc": "project/service", "b": "./x.a"}.
-// It replaces the gist's regex-based extractAliases.
+/*
+@HINT:
+
+`AliasMap(...)` maps local binding names to what they stand for, e.g.
+`{"np": "numpy", "svc": "project/service", "b": "./x.a"}`.
+*/
 func (f *File) AliasMap() map[string]string {
 	m := make(map[string]string)
 
@@ -74,8 +89,12 @@ func (f *File) AliasMap() map[string]string {
 	return m
 }
 
-// ApplyAlias rewrites the first segment of a callee through the alias map:
-// "np.array" -> "numpy.array".
+/*
+@HINT:
+
+`ApplyAlias(...)` rewrites the first segment of a callee through the alias map:
+`"np.array" -> "numpy.array"`.
+*/
 func ApplyAlias(callee string, aliases map[string]string) string {
 	head, rest := callee, ""
 	if i := strings.Index(callee, "."); i >= 0 {
@@ -108,9 +127,18 @@ func (f *File) jsImports(n *sitter.Node) []Import {
 		for _, c := range namedChildren(clause) {
 			switch c.Type() {
 			case "identifier":
-				out = append(out, Import{Path: path, Name: "default", Local: f.Text(c), Line: line})
+				out = append(out, Import{
+					Path:  path,
+					Name:  "default",
+					Local: f.Text(c),
+					Line:  line,
+				})
 			case "namespace_import":
-				out = append(out, Import{Path: path, Local: f.Text(firstNamed(c)), Line: line})
+				out = append(out, Import{
+					Path:  path,
+					Local: f.Text(firstNamed(c)),
+					Line:  line,
+				})
 			case "named_imports":
 				for _, spec := range namedChildren(c) {
 					if spec.Type() != "import_specifier" {
@@ -121,7 +149,12 @@ func (f *File) jsImports(n *sitter.Node) []Import {
 					if a := spec.ChildByFieldName("alias"); a != nil {
 						local = f.Text(a)
 					}
-					out = append(out, Import{Path: path, Name: name, Local: local, Line: line})
+					out = append(out, Import{
+						Path:  path,
+						Name:  name,
+						Local: local,
+						Line:  line,
+					})
 				}
 			}
 		}
@@ -139,7 +172,7 @@ func (f *File) jsImports(n *sitter.Node) []Import {
 			return nil
 		}
 
-		imp := Import{Path: unquote(f.Text(first)), Line: lineOf(n)}
+		imp := Import{Path: unquote(f.Text(first)), Line: lineOf(n), Require: true}
 		if p := n.Parent(); p != nil && p.Type() == "variable_declarator" {
 			if nm := p.ChildByFieldName("name"); nm != nil && nm.Type() == "identifier" {
 				imp.Local = f.Text(nm)
@@ -183,7 +216,12 @@ func (f *File) pyImports(n *sitter.Node) []Import {
 			switch c.Type() {
 			case "dotted_name":
 				name := f.Text(c)
-				out = append(out, Import{Path: mod, Name: name, Local: name, Line: line})
+				out = append(out, Import{
+					Path:  mod,
+					Name:  name,
+					Local: name,
+					Line:  line,
+				})
 			case "aliased_import":
 				out = append(out, Import{
 					Path:  mod,
@@ -254,8 +292,12 @@ func (f *File) goImports(n *sitter.Node) []Import {
 	return []Import{{Path: path, Local: local, Line: lineOf(n)}}
 }
 
-// goDefaultName guesses the package name an unaliased import is bound to:
-// the last path element, skipping a trailing major-version suffix (/v2).
+/*
+@HINT:
+
+`goDefaultName(...)` guesses the package name an unaliased import is bound to:
+the last path element, skipping a trailing major-version suffix (/v2).
+*/
 func goDefaultName(path string) string {
 	parts := strings.Split(path, "/")
 	last := parts[len(parts)-1]

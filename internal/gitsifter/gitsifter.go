@@ -69,7 +69,7 @@ type Options struct {
 	MaxFileSize int64
 }
 
-// Report is the result of TrackChanges.
+/* @HINT: `Report` is the result of `TrackChanges`. */
 type Report struct {
 	CommitsScanned int               `json:"commits_scanned"`
 	FilesParsed    int               `json:"files_parsed"`
@@ -120,10 +120,10 @@ type parsed struct {
 }
 
 /*
-	 @HINT:
+@HINT:
 
-		`TrackChanges(...)` replays the history of the repository at (or above)
-		`repoPath` and reports function interface changes.
+`TrackChanges(...)` replays the history of the repository at (or above)
+`repoPath` and reports function interface changes.
 */
 func TrackChanges(ctx context.Context, repoPath string, opts Options) (*Report, error) {
 	if opts.Workers <= 0 {
@@ -307,7 +307,7 @@ func (t *tracker) processCommit(ctx context.Context, c *object.Commit) error {
 /*
 @HINT:
 
-`parseAll(...)“ parses the given blobs with a bounded worker pool. Results are
+`parseAll(...)` parses the given blobs with a bounded worker pool. Results are
 index-aligned with jobs, so no shared map or mutex is needed and workers
 can never block on an error channel.
 */

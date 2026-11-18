@@ -53,13 +53,13 @@ type Result struct {
 }
 
 /*
-	   @HINT:
+@HINT:
 
-		`MineClosed(...)` finds closed itemsets with at least `opt.MinSize` items that
-		are shared by at least `opt.MinSupport` transactions. The boolean result is
-		true when the candidate cap was hit and the output may be incomplete.
+`MineClosed(...)` finds closed itemsets with at least `opt.MinSize` items that
+are shared by at least `opt.MinSupport` transactions. The boolean result is
+true when the candidate cap was hit and the output may be incomplete.
 
-		Results are sorted by support (desc), size (desc), then lexicographically.
+Results are sorted by support (desc), size (desc), then lexicographically.
 */
 func MineClosed(txs [][]string, opt Options) ([]Result, bool) {
 	opt = opt.withDefaults()

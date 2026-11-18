@@ -38,18 +38,32 @@ type Function struct {
 	// functions belong to those functions; anonymous callbacks/closures
 	// count towards their enclosing function.
 	Calls []Call
+
+	Exported  bool // public API of its module (Go: capitalised, JS: exported, Python: no leading "_", PHP: not private/protected)
+	IsMethod  bool // declared inside a class / on a receiver
+	Decorated bool // Python: wrapped in a decorator (often registered implicitly: routes, fixtures, properties)
+
+	node *sitter.Node // valid only until File.Close
 }
+
+/*
+	@HINT:
+
+	`Node(...)` returns the function's syntax node (for analyses that need
+	to walk the body, such as cyclomatic complexity). It is only valid until
+	the owning File is closed.
+*/
+func (fn *Function) Node() *sitter.Node { return fn.node }
 
 /* @HINT: `Scan` is the result of scanning one file. */
 type Scan struct {
 	Functions []*Function
 	// ModuleCalls are calls outside of any named function (top-level
-	// statements). The gist dropped these whenever a file also contained
-	// at least one function.
+	// statements).
 	ModuleCalls []Call
 }
 
-// Scan walks the syntax tree once and collects functions and calls.
+/* @HINT: `Scan(...)` walks the syntax tree once and collects functions and calls. */
 func (f *File) Scan() *Scan {
 	s := &Scan{}
 	f.scanNode(f.Root(), -1, nil, s)
@@ -92,6 +106,10 @@ func (f *File) scanNode(n *sitter.Node, owner int, scope []string, s *Scan) {
 					StartLine: lineOf(n),
 					EndLine:   endLineOf(n),
 				}
+				fn.node = n
+				fn.Exported = f.isExported(n, name)
+				fn.IsMethod = f.isMethod(n)
+				fn.Decorated = isDecorated(n)
 				fn.Params, fn.ParamText = f.params(n)
 				fn.ResultType = f.resultType(n)
 
@@ -113,26 +131,26 @@ func appendScope(scope []string, name string) []string {
 	return append(out, name)
 }
 
-func (f *File) isFunctionNode(t string) bool {
+func (f *File) isFunctionNode(tokenType string) bool {
 	switch f.Lang {
 	case langs.JavaScript:
-		switch t {
+		switch tokenType {
 		case "function_declaration", "generator_function_declaration",
 			"function", "function_expression", "generator_function",
 			"arrow_function", "method_definition":
 			return true
 		}
 	case langs.Python:
-		return t == "function_definition"
+		return tokenType == "function_definition"
 	case langs.PHP:
-		switch t {
+		switch tokenType {
 		case "function_definition", "method_declaration",
 			"anonymous_function_creation_expression", "anonymous_function",
 			"arrow_function":
 			return true
 		}
 	case langs.Go:
-		switch t {
+		switch tokenType {
 		case "function_declaration", "method_declaration", "func_literal":
 			return true
 		}
@@ -140,14 +158,14 @@ func (f *File) isFunctionNode(t string) bool {
 	return false
 }
 
-func (f *File) isClassNode(t string) bool {
+func (f *File) isClassNode(tokenType string) bool {
 	switch f.Lang {
 	case langs.JavaScript:
-		return t == "class_declaration" || t == "class"
+		return tokenType == "class_declaration" || tokenType == "class"
 	case langs.Python:
-		return t == "class_definition"
+		return tokenType == "class_definition"
 	case langs.PHP:
-		switch t {
+		switch tokenType {
 		case "class_declaration", "interface_declaration", "trait_declaration", "enum_declaration":
 			return true
 		}
@@ -165,10 +183,14 @@ func (f *File) classNameOf(n *sitter.Node) string {
 	return ""
 }
 
-// functionName returns the name of a function node. Anonymous functions
-// that are bound to a variable, object key or assignment target get that
-// name; truly anonymous ones return ok=false and are transparent (their
-// calls count towards the enclosing function).
+/*
+@HINT:
+
+`functionName(...)` returns the name of a function node. Anonymous functions
+that are bound to a variable, object key or assignment target get that
+name; truly anonymous ones return ok=false and are transparent (their
+calls count towards the enclosing function).
+*/
 func (f *File) functionName(n *sitter.Node) (string, bool) {
 	name := f.Text(n.ChildByFieldName("name"))
 
@@ -191,7 +213,7 @@ func (f *File) functionName(n *sitter.Node) (string, bool) {
 	return name, true
 }
 
-// goReceiverType returns "Server" for `func (s *Server) Handle()`.
+/* @HINT: `goReceiverType(...)` returns "Server" for `func (s *Server) Handle()`. */
 func (f *File) goReceiverType(n *sitter.Node) string {
 	if f.Lang != langs.Go || n.Type() != "method_declaration" {
 		return ""
@@ -212,7 +234,7 @@ func (f *File) goReceiverType(n *sitter.Node) string {
 	return ""
 }
 
-// callName returns the callee of a call node, or "" when n is not a call.
+/* @HINT: `callName(...)` returns the callee of a call node, or "" when n is not a call. */
 func (f *File) callName(n *sitter.Node) string {
 	switch n.Type() {
 	case "call_expression", "call", "function_call_expression":
@@ -250,8 +272,12 @@ func joinCallee(object, name string) string {
 	return object + "." + name
 }
 
-// calleeText renders a callee expression ("db.insert", "Foo.bar"). Complex
-// receivers such as `a().b` fall back to the trailing member name.
+/*
+@HINT:
+
+`calleeText(...)` renders a callee expression ("db.insert", "Foo.bar"). Complex
+receivers such as `a().b` fall back to the trailing member name.
+*/
 func (f *File) calleeText(n *sitter.Node) string {
 	if n == nil {
 		return ""
@@ -288,6 +314,9 @@ func (f *File) params(fn *sitter.Node) ([]Param, string) {
 			name := f.Text(single)
 			return []Param{{Name: name}}, name
 		}
+		// @SMELL: Should return an empty array/slice instead of `nil`
+		// @FIXME: Replace `nil` with `noParams`
+		/* @SHIM: noParams = make([]Param, 0) */
 		return nil, ""
 	}
 
@@ -399,8 +428,12 @@ func (f *File) appendParams(out []Param, c *sitter.Node) []Param {
 	return out
 }
 
-// resultType returns the declared result type, or for languages without
-// one: "dynamic" when the function returns a value and "void" otherwise.
+/*
+@HINT:
+
+`resultType(...)` returns the declared result type, or for languages without
+one: "dynamic" when the function returns a value and "void" otherwise.
+*/
 func (f *File) resultType(fn *sitter.Node) string {
 	for _, field := range []string{"result", "return_type"} {
 		if r := fn.ChildByFieldName(field); r != nil {

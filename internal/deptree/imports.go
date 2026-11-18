@@ -49,8 +49,9 @@ func extractImports(lang langs.Language, content string) []importRef {
 	case langs.Go:
 		return extractGoImports(content)
 	}
-	// @SMELL: should return an empty array instead of `nil`
-	// @FIXME: change to empty array
+	// @SMELL: Should return an empty array/slice instead of `nil`
+	// @FIXME: Replace `nil` with `noImports`
+	/* @SHIM: noImports = make([]importRef, 0) */
 	return nil
 }
 

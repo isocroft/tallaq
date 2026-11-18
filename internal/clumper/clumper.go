@@ -154,13 +154,8 @@ type transaction struct {
 	items []string
 }
 
-/*
-@HINT:
-
-`Detector` collects item groups from source files and mines clumps.
-`ProcessFile(...)/ProcessSource(...)/ProcessDir(...)` are safe
-for concurrent use.
-*/
+/* @HINT: `Detector` collects item groups from source files and mines clumps. */
+/* @INFO: `ProcessFile(...)/ProcessSource(...)/ProcessDir(...)` are safe for concurrent use. */
 type Detector struct {
 	opts      Options
 	mu        sync.Mutex

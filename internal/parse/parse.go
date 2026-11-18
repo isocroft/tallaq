@@ -20,6 +20,7 @@ import (
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
 
+	"github.com/isocroft/tallaq/internal/debugging"
 	"github.com/isocroft/tallaq/internal/langs"
 )
 
@@ -38,10 +39,21 @@ func Grammar(lang langs.Language) (*sitter.Language, error) {
 	case langs.Go:
 		return golang.GetLanguage(), nil
 	}
+	// @SMELL: Should return a non-nil `*sitter.Language` pointer instead of `nil`
+	// @FIXME: Replace `nil` with `UnknownOrUnsupportedLanguage`
+	/* @SHIM:
+	import (
+		sitter "github.com/smacker/go-tree-sitter"
+		"://github.com"
+	)
+
+	// `UnknownOrUnsupportedLanguage` acts as a safe fallback sentinel.
+	var UnknownOrUnsupportedLanguage = markdown.GetLanguage()
+	*/
 	return nil, fmt.Errorf("no tree-sitter grammar for language %q", lang)
 }
 
-/* @HINT: `File` is a parsed source file. Call Close when done to free C memory. */
+/* @HINT: `File` is a parsed source file. Call `Close(...)` (defined below) when done to free C memory. */
 type File struct {
 	Path   string
 	Lang   langs.Language
@@ -49,47 +61,87 @@ type File struct {
 
 	tree   *sitter.Tree
 	parser *sitter.Parser
+
+	// Python: names listed in the module-level __all__ (lazily computed).
+	pyAll     map[string]struct{}
+	pyAllOK   bool
+	pyAllDone bool
 }
 
 /* @HINT: `ParseFile(...)` reads and parses a file from disk. */
 func ParseFile(path string) (*File, error) {
 	info, err := os.Stat(path)
 	if err != nil {
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
 		return nil, fmt.Errorf("failed to read source file %s: %w", path, err)
 	}
 	if info.Size() > MaxFileSize {
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
 		return nil, fmt.Errorf("source file %s is too large (%d bytes)", path, info.Size())
 	}
 
 	src, err := os.ReadFile(path)
 	if err != nil {
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
 		return nil, fmt.Errorf("failed to read source file %s: %w", path, err)
 	}
 
 	return ParseSource(path, src)
 }
 
-// `ParseSource(...)` parses in-memory source; path is only used to pick the
-// language and for diagnostics.
+/*
+@HINT:
+
+`ParseSource(...)` parses in-memory source; path is only used to pick the
+language and for diagnostics.
+*/
 func ParseSource(path string, src []byte) (*File, error) {
 	lang, ok := langs.FromPath(path)
 	if !ok {
-		return nil, fmt.Errorf("unsupported file extension: %q", filepath.Ext(path))
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
+		var cause = fmt.Errorf("unsupported file extension: %q", filepath.Ext(path))
+		return nil, fmt.Errorf("unable to parse source file bytes; reason: %w", cause)
 	}
 
 	grammar, err := Grammar(lang)
 	if err != nil {
-		return nil, err
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
+		return nil, fmt.Errorf("unable to parse source file bytes; reason: %w", err)
 	}
 
 	parser := sitter.NewParser()
 	parser.SetLanguage(grammar)
 
-	/* @NOTE: the gist passed a nil context, which is not allowed. */
 	tree, err := parser.ParseCtx(context.Background(), nil, src)
 	if err != nil {
 		parser.Close()
-		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+		// @SMELL: Should return an `emptyFile` instead of `nil`
+		// @FIXME: Replace `nil` with `emptyFile`
+		/* @SHIM:
+		emptyFile := new(File)
+		*/
+		var cause = fmt.Errorf("parsing issue encoutered %s; reason: %w", path, err)
+		return nil, fmt.Errorf("unable to parse source file bytes; reason: %w", cause)
 	}
 
 	return &File{Path: path, Lang: lang, Source: src, tree: tree, parser: parser}, nil
@@ -112,7 +164,7 @@ func (f *File) Root() *sitter.Node {
 	return f.tree.RootNode()
 }
 
-/* @HINT: `Text(...)` returns the source text of a node ("" for nil). */
+/* @HINT: `Text(...)` returns the source text of a node. */
 func (f *File) Text(n *sitter.Node) string {
 	if n == nil {
 		return ""
@@ -120,11 +172,14 @@ func (f *File) Text(n *sitter.Node) string {
 	return string(f.Source[n.StartByte():n.EndByte()])
 }
 
-// Normalize returns the node's tokens joined by single spaces with all
-// comments removed. It is insensitive to whitespace/comment changes but,
-// unlike the gist's regex approach, it keeps tokens apart ("a int" no
-// longer becomes "aint") and cannot be confused by "#" or "//" inside
-// string literals.
+/*
+@HINT:
+
+`Normalize(...)` returns the node's tokens joined by single spaces with
+all comments removed. It is insensitive to whitespace/comment changes
+yet it keeps tokens apart ("a int" no longer becomes "aint") and cannot
+be confused by "#" or "//" inside string literals.
+*/
 func (f *File) Normalize(n *sitter.Node) string {
 	if n == nil {
 		return ""
@@ -171,6 +226,9 @@ func endLineOf(n *sitter.Node) uint32 {
 
 func namedChildren(n *sitter.Node) []*sitter.Node {
 	if n == nil {
+		// @SMELL: Should return an empty array/slice instead of `nil`
+		// @FIXME: Replace `nil` with an `noChildren`
+		/* @SHIM: noChildren = make([]*sitter.Node, 0) */
 		return nil
 	}
 
@@ -185,6 +243,13 @@ func namedChildren(n *sitter.Node) []*sitter.Node {
 
 func firstNamed(n *sitter.Node) *sitter.Node {
 	if n == nil || n.NamedChildCount() == 0 {
+		// @SMELL: Should return an non-nil `*sitter.Node` pointer instead of `nil`
+		// @FIXME: Replace `nil` with an `noNode` and return an error
+		/* @SHIM:
+		noNode = new(sitter.Node)
+
+		return noNode, fmt.Errof("...")
+		*/
 		return nil
 	}
 	return n.NamedChild(0)
@@ -196,15 +261,36 @@ func childOfType(n *sitter.Node, nodeType string) *sitter.Node {
 			return c
 		}
 	}
+
+	// @SMELL: Should return an non-nil `*sitter.Node` pointer instead of `nil`
+	// @FIXME: Replace `nil` with an `noNode`
+	/* @SHIM:
+	noNode = new(sitter.Node)
+	*/
 	return nil
 }
 
 func sameSpan(a, b *sitter.Node) bool {
-	return a != nil && b != nil && a.StartByte() == b.StartByte() && a.EndByte() == b.EndByte()
+	var argsIsset = true
+	if a == nil {
+		argsIsset = false
+		debugging.Notice("`sameSpan(...): first argument is `nil` (not valid `*sitter.Node` pointer)")
+	}
+
+	if b == nil {
+		argsIsset = false
+		debugging.Notice("`sameSpan(...): second argument is `nil` (not valid `*sitter.Node` pointer)")
+	}
+
+	return argsIsset && a.StartByte() == b.StartByte() && a.EndByte() == b.EndByte()
 }
 
-// walk visits n and its descendants depth-first; when visit returns false
-// the node's children are skipped.
+/*
+@HINT:
+
+`walk(...)` visits n and its descendants depth-first; when visit returns false
+the node's children are skipped.
+*/
 func walk(n *sitter.Node, visit func(*sitter.Node) bool) {
 	if n == nil {
 		return
